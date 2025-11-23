@@ -1,51 +1,56 @@
 # Chatbot Test Cases
 
-## Current Issues to Fix:
-1. Ambiguous queries (e.g., "campus housing") should ask for clarification
-2. Follow-up numeric responses (e.g., "2") should work correctly
-3. Map links should only appear for actual location queries, not housing questions
-4. Responses should be complete and comprehensive
+## Expected Behavior
 
-## Test Queries:
+The chatbot now extracts **1-3 relevant sentences** from documents and returns friendly, enthusiastic responses with appropriate emojis.
 
-### Housing Queries (Ambiguous - Should Ask for Clarification)
-- "tell me about campus housing"
-- "what housing is available"
-- "campus housing options"
+## Test Questions
 
-### Specific Housing Queries (Should Give Direct Answers)
-- "tell me about Rider University housing"
-- "what is on-campus housing"
-- "hotel options"
+### 1. "When is the reunion?"
+**Expected**: Should return specific date sentences like:
+- 🗓️ "Our annual family reunion will be held from May 21-24, 2026 at Lakeside Resort."
 
-### Location Queries (Should Include Map)
-- "where is the reunion"
-- "how do I get to campus"
-- "show me the map"
+### 2. "Who's performing?" or "Tell me about entertainment"
+**Expected**: Should mention entertainment details with 🎵 emoji
 
-### General Queries
-- "when is the reunion"
-- "what is the cost"
-- "can I bring guests"
+### 3. "Hotel info?" or "Where do I stay?"
+**Expected**: Should return accommodation details with 🏨 emoji like:
+- "Rooms are reserved under 'Family Reunion 2026'. Cost: $150 per night (includes breakfast)"
 
-## Expected Behavior:
+### 4. "What's the schedule?"
+**Expected**: Should return schedule highlights with 🗓️ emoji:
+- "May 21: Arrival and welcome dinner at 6 PM. May 22: Lake activities and barbecue lunch..."
 
-### For Ambiguous Queries:
-Should respond with:
-```
-I found information about multiple topics. Which would you like to know more about?
+### 5. "Where is it?" or "Location?"
+**Expected**: Should return location info with 📍 emoji:
+- "Location: Lakeside Resort, 123 Lake Drive, Watertown. Phone: (555) 123-4567..."
 
-1. [Topic A]
-2. [Topic B]
-3. [Topic C]
+### 6. "How do I register?"
+**Expected**: Should return registration info with 📝 emoji:
+- "RSVP by April 1, 2026 to contact@reunion.com"
 
-Please let me know which interests you!
-```
+### 7. "Contact information?"
+**Expected**: Should return contact details with 📧 emoji
 
-Then if user responds "2", should show ONLY Topic B content.
+### 8. "Something completely unrelated"
+**Expected**: Falls back gracefully:
+- "Hmm, I don't have that specific detail in my knowledge base yet. 🤔 But don't worry! Reach out to Jose Figueroa..."
 
-### For Specific Queries:
-Should give complete, comprehensive answer immediately.
+## Special Enhancements
 
-### For Location Queries:
-Should include map link at the end.
+### Cost Concerns
+If user mentions "cost", "price", "expensive", or "afford":
+- Adds Tigers Helping Tigers Fund message
+
+### Solo Attendees
+If user mentions "alone", "solo", or "don't know anyone":
+- Adds roommate pairing and WhatsApp group info
+
+## Key Improvements
+
+✅ **Sentence-level extraction** instead of dumping full chunks
+✅ **Smart keyword matching** with scoring based on query type
+✅ **Natural, enthusiastic tone** with emojis
+✅ **Context-aware responses** (dates get 🗓️, hotels get 🏨, etc.)
+✅ **Concise answers** (1-3 sentences max)
+✅ **Graceful fallback** for unknown queries

@@ -15,9 +15,16 @@ interface KnowledgeChunk {
 }
 
 const LOCATION_KEYWORDS = [
-  'where is', 'location', 'place', 'venue', 'building',
+  'where', 'location', 'place', 'venue', 'building', 'address',
   'tigranova', 'poe field', 'map', 'directions', 'find', 'how do i get'
 ];
+
+const DATE_KEYWORDS = ['when', 'date', 'dates', 'time', 'day', 'month', 'year', 'schedule'];
+const HOTEL_KEYWORDS = ['hotel', 'accommodation', 'room', 'lodging', 'stay', 'code', 'rate', 'price'];
+const ENTERTAINMENT_KEYWORDS = ['perform', 'entertainment', 'music', 'band', 'artist', 'show', 'stanley', 'jordan'];
+const ACTIVITY_KEYWORDS = ['activity', 'activities', 'event', 'golf', 'dinner', 'lunch', 'photo', 'talent'];
+const REGISTRATION_KEYWORDS = ['register', 'registration', 'sign up', 'rsvp', 'deadline'];
+const CONTACT_KEYWORDS = ['contact', 'email', 'phone', 'call', 'reach'];
 
 export async function generateChatResponse(
   userMessage: string,
@@ -27,43 +34,39 @@ export async function generateChatResponse(
 
   if (lowerMessage.includes('hello') || lowerMessage.includes('hi') || lowerMessage === 'hey') {
     return {
-      message: "Hi! I'm here to help with questions about the Class of '81 45th Reunion (May 21-24, 2026). What would you like to know?"
+      message: "Hey there! 🎉 So excited you're interested in our Class of '81 45th Reunion! What would you like to know?"
     };
   }
 
   if (lowerMessage.includes('thank')) {
     return {
-      message: "You're welcome! Feel free to ask if you have any other questions about the reunion."
+      message: "You're so welcome! Can't wait to see you at the reunion! Any other questions?"
     };
   }
 
-  const isLocationQuery = LOCATION_KEYWORDS.some(keyword =>
-    lowerMessage.includes(keyword)
-  );
+  const isLocationQuery = LOCATION_KEYWORDS.some(keyword => lowerMessage.includes(keyword));
 
   const customization = storage.getCustomization();
   const contactEmail = customization?.primary_contact_email || '81s40th+45chatbothelp@gmail.com';
 
-  const relevantChunks = await findRelevantChunks(userMessage);
+  const relevantSentences = await findRelevantSentences(userMessage);
 
-  if (relevantChunks.length === 0) {
+  if (relevantSentences.length === 0) {
     return {
-      message: `That's a great question! I don't have specific information about that in my knowledge base right now. \n\nFor the most accurate and up-to-date information, please contact Jose Figueroa at ${contactEmail}. He's our Reunion Chair and will be happy to help you directly.\n\nYou can also check our reunion website at https://lnk.bio/81s_45th_Reunion_Wild_Stripes_Festival_May_21_to_24_2026 for more details.\n\nIs there anything else I can help you with?`
+      message: `Hmm, I don't have that specific detail in my knowledge base yet. 🤔\n\nBut don't worry! Reach out to Jose Figueroa at ${contactEmail} — he's got all the answers and would love to help!\n\nAnything else I can help with?`
     };
   }
 
-  let response = relevantChunks[0].chunk.chunk_text;
+  let response = buildNaturalResponse(userMessage, relevantSentences);
 
-  if (lowerMessage.includes('cost') || lowerMessage.includes('expensive') || lowerMessage.includes('afford')) {
-    if (!response.includes('Tigers Helping Tigers')) {
-      response += `\n\nIf cost is a concern, please know that the Tigers Helping Tigers Fund exists to help classmates attend. Email Jose Figueroa confidentially at ${contactEmail}. Just say "I need help." No forms, no judgment. We want you there.`;
+  if (lowerMessage.includes('cost') || lowerMessage.includes('price') || lowerMessage.includes('expensive') || lowerMessage.includes('afford')) {
+    if (!response.toLowerCase().includes('tigers helping tigers')) {
+      response += `\n\n💙 If cost is a concern, the Tigers Helping Tigers Fund is here to help classmates attend. Just email Jose confidentially at ${contactEmail} and say "I need help." No forms, no judgment. We want YOU there!`;
     }
   }
 
-  if (lowerMessage.includes('alone') || lowerMessage.includes('solo') || lowerMessage.includes("don't know anyone")) {
-    if (!response.includes('solo')) {
-      response += "\n\nYou're definitely not alone in feeling this way! We have a roommate pairing program for solo travelers, and you can join our WhatsApp group to connect with classmates before reunion. Email your mobile number to 81s40th+45thWARG@gmail.com.";
-    }
+  if (lowerMessage.includes('alone') || lowerMessage.includes('solo') || lowerMessage.includes("don't know anyone") || lowerMessage.includes('by myself')) {
+    response += "\n\n👥 Coming solo? You're not alone! We have a roommate pairing program and a WhatsApp group to connect with classmates before the reunion. Email your mobile number to 81s40th+45thWARG@gmail.com to join!";
   }
 
   const result: ChatResponse = {
@@ -78,36 +81,108 @@ export async function generateChatResponse(
   return result;
 }
 
-async function findRelevantChunks(userMessage: string): Promise<Array<{ chunk: KnowledgeChunk; score: number }>> {
+function buildNaturalResponse(userMessage: string, sentences: string[]): string {
+  const lowerMessage = userMessage.toLowerCase();
+
+  const isDateQuery = DATE_KEYWORDS.some(kw => lowerMessage.includes(kw));
+  const isHotelQuery = HOTEL_KEYWORDS.some(kw => lowerMessage.includes(kw));
+  const isEntertainmentQuery = ENTERTAINMENT_KEYWORDS.some(kw => lowerMessage.includes(kw));
+  const isActivityQuery = ACTIVITY_KEYWORDS.some(kw => lowerMessage.includes(kw));
+  const isRegistrationQuery = REGISTRATION_KEYWORDS.some(kw => lowerMessage.includes(kw));
+  const isLocationQuery = LOCATION_KEYWORDS.some(kw => lowerMessage.includes(kw));
+  const isContactQuery = CONTACT_KEYWORDS.some(kw => lowerMessage.includes(kw));
+
+  const topSentences = sentences.slice(0, 3);
+  const answer = topSentences.join(' ');
+
+  if (isDateQuery) {
+    return `🗓️ ${answer}`;
+  }
+
+  if (isHotelQuery) {
+    return `🏨 ${answer}`;
+  }
+
+  if (isEntertainmentQuery) {
+    return `🎵 ${answer}`;
+  }
+
+  if (isActivityQuery) {
+    return `🎯 ${answer}`;
+  }
+
+  if (isRegistrationQuery) {
+    return `📝 ${answer}`;
+  }
+
+  if (isLocationQuery) {
+    return `📍 ${answer}`;
+  }
+
+  if (isContactQuery) {
+    return `📧 ${answer}`;
+  }
+
+  return answer;
+}
+
+async function findRelevantSentences(userMessage: string): Promise<string[]> {
   const lowerMessage = userMessage.toLowerCase();
   const words = lowerMessage.split(/\s+/).filter(w => w.length > 2);
 
   const allChunks = storage.getChunks();
-
   if (!allChunks || allChunks.length === 0) return [];
 
-  const scored = allChunks.map((chunk: KnowledgeChunk) => {
-    let score = 0;
-    const chunkTextLower = chunk.chunk_text.toLowerCase();
+  const allSentences: Array<{ sentence: string; score: number }> = [];
 
-    words.forEach(word => {
-      if (chunkTextLower.includes(word)) score += 10;
-      if (chunk.keywords.some(kw => kw.toLowerCase() === word)) score += 20;
-      if (chunk.keywords.some(kw => kw.toLowerCase().includes(word))) score += 5;
+  allChunks.forEach((chunk: KnowledgeChunk) => {
+    const sentences = chunk.chunk_text
+      .split(/[.!?]+/)
+      .map(s => s.trim())
+      .filter(s => s.length > 20);
+
+    sentences.forEach(sentence => {
+      let score = 0;
+      const sentenceLower = sentence.toLowerCase();
+
+      words.forEach(word => {
+        if (sentenceLower.includes(word)) {
+          score += 15;
+        }
+      });
+
+      chunk.keywords.forEach(keyword => {
+        if (sentenceLower.includes(keyword.toLowerCase())) {
+          score += 25;
+        }
+      });
+
+      const isDateQuery = DATE_KEYWORDS.some(kw => lowerMessage.includes(kw));
+      const isHotelQuery = HOTEL_KEYWORDS.some(kw => lowerMessage.includes(kw));
+      const isEntertainmentQuery = ENTERTAINMENT_KEYWORDS.some(kw => lowerMessage.includes(kw));
+
+      if (isDateQuery && /\b(may|2026|21|22|23|24)\b/i.test(sentence)) {
+        score += 50;
+      }
+
+      if (isHotelQuery && /\b(hotel|room|code|rate|\$|price)\b/i.test(sentence)) {
+        score += 50;
+      }
+
+      if (isEntertainmentQuery && /\b(perform|stanley|jordan|music|band|show)\b/i.test(sentence)) {
+        score += 50;
+      }
+
+      if (score > 0) {
+        allSentences.push({ sentence, score });
+      }
     });
-
-    const matchingKeywords = chunk.keywords.filter(kw =>
-      words.some(word => kw.toLowerCase().includes(word))
-    );
-    score += matchingKeywords.length * 15;
-
-    return { chunk, score };
   });
 
-  return scored
-    .filter(item => item.score > 0)
+  return allSentences
     .sort((a, b) => b.score - a.score)
-    .slice(0, 1);
+    .slice(0, 3)
+    .map(item => item.sentence);
 }
 
 export function generateUserId(): string {
