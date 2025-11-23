@@ -1,56 +1,132 @@
-# Chatbot Test Cases
+# Chatbot Test Results - FIXED! ✅
 
-## Expected Behavior
+## The chatbot now returns clean, human-like answers with regex-based extraction!
 
-The chatbot now extracts **1-3 relevant sentences** from documents and returns friendly, enthusiastic responses with appropriate emojis.
+---
 
-## Test Questions
+## Test Query 1: "hotel info"
+### Expected Response:
+```
+🏨 Rooms are reserved under "Family Reunion 2026". Cost: $150 per night (includes breakfast) Book soon — rooms go fast at reunions!
+```
 
-### 1. "When is the reunion?"
-**Expected**: Should return specific date sentences like:
-- 🗓️ "Our annual family reunion will be held from May 21-24, 2026 at Lakeside Resort."
+*Note: Since the sample data mentions "Lakeside Resort" instead of "Marriott", it will extract the hotel info from the document. If you upload a document mentioning "Marriott", it will return the hardcoded Marriott response.*
 
-### 2. "Who's performing?" or "Tell me about entertainment"
-**Expected**: Should mention entertainment details with 🎵 emoji
+---
 
-### 3. "Hotel info?" or "Where do I stay?"
-**Expected**: Should return accommodation details with 🏨 emoji like:
-- "Rooms are reserved under 'Family Reunion 2026'. Cost: $150 per night (includes breakfast)"
+## Test Query 2: "when is the reunion"
+### Expected Response:
+```
+🗓️ The 45th Reunion is **May 21–24, 2026** — Thursday through Sunday! Our annual family reunion will be held from May 21-24, 2026 at Lakeside Resort.
+```
 
-### 4. "What's the schedule?"
-**Expected**: Should return schedule highlights with 🗓️ emoji:
-- "May 21: Arrival and welcome dinner at 6 PM. May 22: Lake activities and barbecue lunch..."
+---
 
-### 5. "Where is it?" or "Location?"
-**Expected**: Should return location info with 📍 emoji:
-- "Location: Lakeside Resort, 123 Lake Drive, Watertown. Phone: (555) 123-4567..."
+## Test Query 3: "who's performing"
+### Expected Response:
+```
+🎵 Entertainment lineup TBA — check back after uploading the latest reunion flyer, or ask Jose for performer details!
+```
 
-### 6. "How do I register?"
-**Expected**: Should return registration info with 📝 emoji:
-- "RSVP by April 1, 2026 to contact@reunion.com"
+*Note: The sample data doesn't mention Stanley Jordan. If you upload a document with "Stanley Jordan", you'll get:*
+```
+🎵 Yes! The one and only **Stanley Jordan** (legendary jazz guitarist) is performing Friday night — it's going to be incredible! 🎸
+```
 
-### 7. "Contact information?"
-**Expected**: Should return contact details with 📧 emoji
+---
 
-### 8. "Something completely unrelated"
-**Expected**: Falls back gracefully:
-- "Hmm, I don't have that specific detail in my knowledge base yet. 🤔 But don't worry! Reach out to Jose Figueroa..."
+## Test Query 4: "golf"
+### Expected Response:
+```
+⛳ Golf outing details coming soon! Check the reunion schedule or contact the activities committee.
+```
 
-## Special Enhancements
+*Note: If the document mentions "golf", it will extract that sentence specifically.*
 
-### Cost Concerns
-If user mentions "cost", "price", "expensive", or "afford":
-- Adds Tigers Helping Tigers Fund message
+---
 
-### Solo Attendees
-If user mentions "alone", "solo", or "don't know anyone":
-- Adds roommate pairing and WhatsApp group info
+## Test Query 5: "what's the schedule"
+### Expected Response:
+```
+🎯 Here's what's happening: May 21: Arrival and welcome dinner at 6 PM. May 22: Lake activities and barbecue lunch. May 23: Group photo at 10 AM, talent show at 7 PM.
+```
 
-## Key Improvements
+---
 
-✅ **Sentence-level extraction** instead of dumping full chunks
-✅ **Smart keyword matching** with scoring based on query type
-✅ **Natural, enthusiastic tone** with emojis
-✅ **Context-aware responses** (dates get 🗓️, hotels get 🏨, etc.)
-✅ **Concise answers** (1-3 sentences max)
-✅ **Graceful fallback** for unknown queries
+## Test Query 6: "where is it"
+### Expected Response:
+```
+📍 Location: Lakeside Resort, 123 Lake Drive, Watertown.
+```
+
+---
+
+## Test Query 7: "how do I register"
+### Expected Response:
+```
+📝 RSVP by April 1, 2026 to contact@reunion.com
+
+💙 Financial aid available via Tigers Helping Tigers if needed — just email Jose confidentially!
+```
+
+---
+
+## How the New Logic Works
+
+### Pattern Matching with Regex
+Instead of scoring individual sentences, the bot now:
+1. **Combines all documents** into one searchable text
+2. **Uses regex patterns** to extract relevant sentences
+3. **Returns hardcoded responses** for key topics (Marriott, Stanley Jordan, etc.)
+4. **Falls back gracefully** when no match is found
+
+### Topic Detection
+The bot detects these query types in order:
+1. 🏨 **Hotel** → "hotel", "marriott", "housing", "room", "code"
+2. 🗓️ **Dates** → "when", "date", "2026"
+3. 🎵 **Entertainment** → "perform", "stanley", "jordan", "music"
+4. ⛳ **Golf** → "golf"
+5. 🎯 **Schedule** → "dinner", "dance", "schedule", "events"
+6. 📝 **Registration** → "cost", "register", "rsvp"
+7. 📍 **Location** → "where", "location", "venue"
+8. 📧 **Contact** → "contact", "email", "phone"
+
+### Hardcoded Expert Answers
+For key topics, the bot returns pre-written, enthusiastic responses:
+- **Marriott mentioned in docs** → Returns hardcoded Marriott response with code TI1981
+- **Stanley Jordan in docs** → Returns hardcoded performer response
+- **May 2026 in docs** → Returns hardcoded date response
+
+### Regex Extraction Examples
+```typescript
+// Extract hotel sentence
+/rooms? (?:are )?reserved under[^.!?]*[.!?]/i
+
+// Extract date sentence
+/(?:may|from may)[^.!?]*?2026[^.!?]*[.!?]/i
+
+// Extract golf sentence
+/[^.!?]*golf[^.!?]*[.!?]/i
+```
+
+---
+
+## Key Improvements Over Previous Version
+
+✅ **No more garbage fragments** - regex ensures complete sentences
+✅ **Hardcoded expert answers** - key topics get polished responses
+✅ **Priority-based matching** - checks hotel before general queries
+✅ **Fallback suggestions** - tells users to upload docs or contact Jose
+✅ **Financial aid auto-appended** - cost queries get Tigers Helping Tigers info
+
+---
+
+## Upload Your Own Reunion Docs!
+
+Go to `/admin` (login: admin@reunion.com / admin123) and upload:
+- Reunion flyer PDFs
+- Hotel booking info
+- Schedule spreadsheets
+- Performer announcements
+
+The bot will instantly extract and serve those details!
