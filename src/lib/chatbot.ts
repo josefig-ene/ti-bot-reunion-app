@@ -1,4 +1,4 @@
-import { supabase } from './supabase';
+import { storage } from './storage';
 
 export interface ChatResponse {
   message: string;
@@ -9,13 +9,9 @@ export interface ChatResponse {
 interface KnowledgeChunk {
   id: string;
   file_id: string;
-  chunk_type: 'qa' | 'section' | 'table';
-  question: string | null;
-  answer: string;
-  context: string | null;
-  category: string;
+  chunk_index: number;
+  chunk_text: string;
   keywords: string[];
-  source_location: string | null;
 }
 
 const LOCATION_KEYWORDS = [
@@ -45,11 +41,7 @@ export async function generateChatResponse(
     lowerMessage.includes(keyword)
   );
 
-  const { data: customization } = await supabase
-    .from('app_customization')
-    .select('*')
-    .single();
-
+  const customization = storage.getCustomization();
   const contactEmail = customization?.primary_contact_email || '81s40th+45chatbothelp@gmail.com';
 
   const relevantChunks = await findRelevantChunks(userMessage);
@@ -60,7 +52,7 @@ export async function generateChatResponse(
     };
   }
 
-  let response = relevantChunks[0].chunk.answer;
+  let response = relevantChunks[0].chunk.chunk_text;
 
   if (lowerMessage.includes('cost') || lowerMessage.includes('expensive') || lowerMessage.includes('afford')) {
     if (!response.includes('Tigers Helping Tigers')) {
@@ -90,40 +82,24 @@ async function findRelevantChunks(userMessage: string): Promise<Array<{ chunk: K
   const lowerMessage = userMessage.toLowerCase();
   const words = lowerMessage.split(/\s+/).filter(w => w.length > 2);
 
-  const { data: allChunks } = await supabase
-    .from('knowledge_chunks')
-    .select('*')
-    .eq('is_active', true);
+  const allChunks = storage.getChunks();
 
   if (!allChunks || allChunks.length === 0) return [];
 
   const scored = allChunks.map((chunk: KnowledgeChunk) => {
     let score = 0;
-    const questionLower = (chunk.question || '').toLowerCase();
-    const answerLower = chunk.answer.toLowerCase();
-    const categoryLower = chunk.category.toLowerCase();
-
-    if (chunk.chunk_type === 'qa' && questionLower) {
-      const questionWords = questionLower.split(/\s+/).filter((w: string) => w.length > 2);
-      const matchingWords = words.filter(w => questionWords.includes(w));
-
-      if (matchingWords.length === words.length && words.length > 0) {
-        score += 100;
-      } else if (matchingWords.length > 0) {
-        score += matchingWords.length * 20;
-      }
-    }
-
-    if (answerLower.length > 100 && answerLower.length < 500) {
-      score += 5;
-    }
+    const chunkTextLower = chunk.chunk_text.toLowerCase();
 
     words.forEach(word => {
-      if (questionLower.includes(word)) score += 8;
-      if (answerLower.includes(word)) score += 3;
-      if (categoryLower.includes(word)) score += 4;
-      if (chunk.keywords.some(kw => kw.toLowerCase() === word)) score += 12;
+      if (chunkTextLower.includes(word)) score += 10;
+      if (chunk.keywords.some(kw => kw.toLowerCase() === word)) score += 20;
+      if (chunk.keywords.some(kw => kw.toLowerCase().includes(word))) score += 5;
     });
+
+    const matchingKeywords = chunk.keywords.filter(kw =>
+      words.some(word => kw.toLowerCase().includes(word))
+    );
+    score += matchingKeywords.length * 15;
 
     return { chunk, score };
   });

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Send, Download, X, MessageSquare } from 'lucide-react';
-import { supabase, ChatMessage, AppCustomization } from '../lib/supabase';
+import { storage, ChatMessage, AppCustomization } from '../lib/storage';
 import { generateChatResponse, generateUserId } from '../lib/chatbot';
 
 interface ChatInterfaceProps {
@@ -30,147 +30,46 @@ export default function ChatInterface({ onEndChat, initialMessage }: ChatInterfa
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
-  const loadCustomization = async () => {
-    const { data } = await supabase
-      .from('app_customization')
-      .select('*')
-      .single();
+  const loadCustomization = () => {
+    const data = storage.getCustomization();
+    setCustomization(data);
+  };
 
-    if (data) {
-      setCustomization(data);
+  const initializeChat = () => {
+    const newSessionId = `session-${Date.now()}`;
+    setSessionId(newSessionId);
+
+    const session = {
+      id: newSessionId,
+      user_identifier: userId,
+      started_at: new Date().toISOString(),
+      ended_at: null,
+      is_active: true
+    };
+    storage.saveSession(session);
+
+    if (initialMessage) {
+      handleSendMessage(initialMessage);
     }
   };
 
-  const initializeChat = async () => {
-    const { data: session } = await supabase
-      .from('chat_sessions')
-      .insert({
-        user_identifier: userId,
-        is_active: true
-      })
-      .select()
-      .single();
+  const handleSendMessage = async (messageText?: string) => {
+    const textToSend = messageText || inputValue.trim();
+    if (!textToSend || !sessionId) return;
 
-    if (session) {
-      setSessionId(session.id);
+    const userMessage: ChatMessage = {
+      id: `msg-${Date.now()}`,
+      session_id: sessionId,
+      role: 'user',
+      content: textToSend,
+      timestamp: new Date().toISOString(),
+      metadata: {}
+    };
 
-      const welcomeMessage = customization?.welcome_message ||
-        "Hi! I'm here to help with questions about the Class of '81 45th Reunion (May 21-24, 2026). What would you like to know?";
-
-      const { data: msg } = await supabase
-        .from('chat_messages')
-        .insert({
-          session_id: session.id,
-          role: 'assistant',
-          content: welcomeMessage,
-          metadata: {}
-        })
-        .select()
-        .single();
-
-      if (msg) {
-        setMessages([msg]);
-      }
-
-      if (initialMessage) {
-        setTimeout(() => {
-          sendInitialMessage(session.id, initialMessage, [msg]);
-        }, 100);
-      }
-    }
-  };
-
-  const sendInitialMessage = async (sessionId: string, message: string, currentMessages: ChatMessage[]) => {
-    setIsLoading(true);
-
-    const { data: userMsg } = await supabase
-      .from('chat_messages')
-      .insert({
-        session_id: sessionId,
-        role: 'user',
-        content: message,
-        metadata: {}
-      })
-      .select()
-      .single();
-
-    if (userMsg) {
-      setMessages(prev => [...prev, userMsg]);
-
-      try {
-        const conversationHistory = currentMessages.map(m => ({
-          role: m.role,
-          content: m.content
-        }));
-
-        const response = await generateChatResponse(message, conversationHistory);
-
-        let assistantContent = response.message;
-        const metadata: Record<string, any> = {};
-
-        if (response.includeMap && response.mapLink) {
-          assistantContent += `\n\n📍 View campus map: ${response.mapLink}`;
-          metadata.mapLink = response.mapLink;
-        }
-
-        const { data: assistantMsg } = await supabase
-          .from('chat_messages')
-          .insert({
-            session_id: sessionId,
-            role: 'assistant',
-            content: assistantContent,
-            metadata
-          })
-          .select()
-          .single();
-
-        if (assistantMsg) {
-          setMessages(prev => [...prev, assistantMsg]);
-        }
-      } catch (error) {
-        console.error('Error generating response:', error);
-
-        const errorMsg = await supabase
-          .from('chat_messages')
-          .insert({
-            session_id: sessionId,
-            role: 'assistant',
-            content: "I'm having trouble processing that right now. Please try again or contact Jose Figueroa at 81s40th+45chatbothelp@gmail.com for assistance.",
-            metadata: {}
-          })
-          .select()
-          .single();
-
-        if (errorMsg.data) {
-          setMessages(prev => [...prev, errorMsg.data]);
-        }
-      }
-    }
-
-    setIsLoading(false);
-  };
-
-  const handleSendMessage = async () => {
-    if (!inputValue.trim() || isLoading || !sessionId) return;
-
-    const userMessage = inputValue.trim();
+    storage.saveMessage(userMessage);
+    setMessages(prev => [...prev, userMessage]);
     setInputValue('');
     setIsLoading(true);
-
-    const { data: userMsg } = await supabase
-      .from('chat_messages')
-      .insert({
-        session_id: sessionId,
-        role: 'user',
-        content: userMessage,
-        metadata: {}
-      })
-      .select()
-      .single();
-
-    if (userMsg) {
-      setMessages(prev => [...prev, userMsg]);
-    }
 
     try {
       const conversationHistory = messages.map(m => ({
@@ -178,196 +77,182 @@ export default function ChatInterface({ onEndChat, initialMessage }: ChatInterfa
         content: m.content
       }));
 
-      const response = await generateChatResponse(userMessage, conversationHistory);
+      const response = await generateChatResponse(textToSend, conversationHistory);
 
       let assistantContent = response.message;
-      const metadata: Record<string, any> = {};
-
       if (response.includeMap && response.mapLink) {
-        assistantContent += `\n\n📍 View campus map: ${response.mapLink}`;
-        metadata.mapLink = response.mapLink;
+        assistantContent += `\n\n[View on Google Maps](${response.mapLink})`;
       }
 
-      const { data: assistantMsg } = await supabase
-        .from('chat_messages')
-        .insert({
-          session_id: sessionId,
-          role: 'assistant',
-          content: assistantContent,
-          metadata
-        })
-        .select()
-        .single();
+      const assistantMessage: ChatMessage = {
+        id: `msg-${Date.now()}-assistant`,
+        session_id: sessionId,
+        role: 'assistant',
+        content: assistantContent,
+        timestamp: new Date().toISOString(),
+        metadata: {
+          includeMap: response.includeMap,
+          mapLink: response.mapLink
+        }
+      };
 
-      if (assistantMsg) {
-        setMessages(prev => [...prev, assistantMsg]);
-      }
+      storage.saveMessage(assistantMessage);
+      setMessages(prev => [...prev, assistantMessage]);
     } catch (error) {
       console.error('Error generating response:', error);
-
-      const errorMsg = await supabase
-        .from('chat_messages')
-        .insert({
-          session_id: sessionId,
-          role: 'assistant',
-          content: "I'm having trouble processing that right now. Please try again or contact Jose Figueroa at 81s40th+45chatbothelp@gmail.com for assistance.",
-          metadata: {}
-        })
-        .select()
-        .single();
-
-      if (errorMsg.data) {
-        setMessages(prev => [...prev, errorMsg.data]);
-      }
+      const errorMessage: ChatMessage = {
+        id: `msg-${Date.now()}-error`,
+        session_id: sessionId,
+        role: 'assistant',
+        content: 'Sorry, I encountered an error processing your message. Please try again.',
+        timestamp: new Date().toISOString(),
+        metadata: {}
+      };
+      storage.saveMessage(errorMessage);
+      setMessages(prev => [...prev, errorMessage]);
     } finally {
       setIsLoading(false);
     }
   };
 
-  const handleDownloadChat = () => {
-    const chatText = messages.map(msg => {
-      const timestamp = new Date(msg.timestamp).toLocaleString();
-      const role = msg.role === 'user' ? 'You' : 'Assistant';
-      return `[${timestamp}] ${role}: ${msg.content}`;
-    }).join('\n\n');
+  const handleEndChat = () => {
+    if (sessionId) {
+      const sessions = storage.getSessions();
+      const session = sessions.find(s => s.id === sessionId);
+      if (session) {
+        session.is_active = false;
+        session.ended_at = new Date().toISOString();
+        storage.saveSession(session);
+      }
+    }
+    onEndChat();
+  };
+
+  const downloadChatHistory = () => {
+    const chatText = messages
+      .map(m => `${m.role.toUpperCase()}: ${m.content}`)
+      .join('\n\n');
 
     const blob = new Blob([chatText], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `reunion-chat-${new Date().toISOString().split('T')[0]}.txt`;
+    a.download = `chat-history-${new Date().toISOString()}.txt`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
   };
 
-  const handleEndChat = async () => {
-    if (sessionId) {
-      await supabase
-        .from('chat_sessions')
-        .update({ is_active: false, ended_at: new Date().toISOString() })
-        .eq('id', sessionId);
-    }
-    onEndChat();
-  };
-
-  const handleKeyPress = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSendMessage();
-    }
-  };
-
   return (
-    <div className="flex flex-col h-screen bg-gradient-to-br from-orange-50 to-gray-50">
-      <div className="bg-white border-b border-gray-200 px-6 py-4 shadow-sm">
-        <div className="flex items-center justify-between max-w-4xl mx-auto">
-          <div className="flex items-center gap-3">
-            {customization?.app_icon_url ? (
-              <img
-                src={customization.app_icon_url}
-                alt="App Icon"
-                className="w-10 h-10 rounded-lg object-cover"
-              />
-            ) : (
-              <MessageSquare className="w-10 h-10 text-orange-600" />
-            )}
-            <div>
-              <h1 className="text-xl font-bold text-gray-900">
-                {customization?.app_name || "Class of '81 Reunion Assistant"}
-              </h1>
-              <p className="text-sm text-gray-500">May 21-24, 2026</p>
-            </div>
-          </div>
-          <div className="flex gap-2">
-            <button
-              onClick={handleDownloadChat}
-              className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
-              title="Download chat history"
-            >
-              <Download className="w-4 h-4" />
-              <span className="hidden sm:inline">Download</span>
-            </button>
-            <button
-              onClick={handleEndChat}
-              className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-orange-600 rounded-lg hover:bg-orange-700 transition-colors"
-              title="End chat"
-            >
-              <X className="w-4 h-4" />
-              <span className="hidden sm:inline">End Chat</span>
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <div className="flex-1 overflow-y-auto px-4 py-6">
-        <div className="max-w-4xl mx-auto space-y-4">
-          {messages.map((message) => (
-            <div
-              key={message.id}
-              className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
-            >
-              <div
-                className={`max-w-[80%] rounded-2xl px-4 py-3 ${
-                  message.role === 'user'
-                    ? 'bg-orange-600 text-white'
-                    : 'bg-white text-gray-900 shadow-sm border border-gray-100'
-                }`}
-              >
-                <p className="whitespace-pre-wrap text-sm leading-relaxed">
-                  {message.content.replace(/\[CHUNK_IDS:[^\]]+\]/g, '')}
-                </p>
-                {message.metadata?.mapLink && (
-                  <a
-                    href={message.metadata.mapLink}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className={`inline-block mt-2 text-sm underline ${
-                      message.role === 'user' ? 'text-orange-100' : 'text-orange-600'
-                    }`}
-                  >
-                    Open in Google Maps
-                  </a>
-                )}
-              </div>
-            </div>
-          ))}
-          {isLoading && (
-            <div className="flex justify-start">
-              <div className="bg-white rounded-2xl px-4 py-3 shadow-sm border border-gray-100">
-                <div className="flex gap-1">
-                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
-                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
-                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
-                </div>
-              </div>
-            </div>
+    <div className="flex flex-col h-screen bg-gradient-to-br from-blue-50 to-indigo-50">
+      <div className="bg-white border-b border-gray-200 px-6 py-4 flex justify-between items-center shadow-sm">
+        <div className="flex items-center gap-3">
+          {customization?.app_icon_url && (
+            <img
+              src={customization.app_icon_url}
+              alt="App Icon"
+              className="w-10 h-10 rounded-lg object-cover"
+            />
           )}
-          <div ref={messagesEndRef} />
+          <div>
+            <h1 className="text-xl font-bold text-gray-800">
+              {customization?.app_name || 'Ti-Bot Reunion Assistant'}
+            </h1>
+            <p className="text-sm text-gray-500">Ask me anything about the reunion</p>
+          </div>
+        </div>
+        <div className="flex gap-2">
+          <button
+            onClick={downloadChatHistory}
+            className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+            title="Download chat history"
+          >
+            <Download className="w-5 h-5" />
+          </button>
+          <button
+            onClick={handleEndChat}
+            className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+            title="End chat"
+          >
+            <X className="w-5 h-5" />
+          </button>
         </div>
       </div>
 
-      <div className="bg-white border-t border-gray-200 px-4 py-4">
-        <div className="max-w-4xl mx-auto flex gap-3">
+      <div className="flex-1 overflow-y-auto px-6 py-6 space-y-4">
+        {messages.length === 0 && (
+          <div className="flex items-center justify-center h-full">
+            <div className="text-center max-w-md">
+              <MessageSquare className="w-16 h-16 text-indigo-300 mx-auto mb-4" />
+              <h2 className="text-2xl font-semibold text-gray-700 mb-2">Start a conversation</h2>
+              <p className="text-gray-500">
+                {customization?.welcome_message || 'Ask me anything about the reunion!'}
+              </p>
+            </div>
+          </div>
+        )}
+
+        {messages.map((message) => (
+          <div
+            key={message.id}
+            className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
+          >
+            <div
+              className={`max-w-[70%] rounded-2xl px-4 py-3 ${
+                message.role === 'user'
+                  ? 'bg-indigo-600 text-white'
+                  : 'bg-white text-gray-800 shadow-md border border-gray-100'
+              }`}
+            >
+              <p className="whitespace-pre-wrap">{message.content}</p>
+              <p className={`text-xs mt-2 ${message.role === 'user' ? 'text-indigo-200' : 'text-gray-400'}`}>
+                {new Date(message.timestamp).toLocaleTimeString()}
+              </p>
+            </div>
+          </div>
+        ))}
+
+        {isLoading && (
+          <div className="flex justify-start">
+            <div className="max-w-[70%] rounded-2xl px-4 py-3 bg-white shadow-md border border-gray-100">
+              <div className="flex gap-2">
+                <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+              </div>
+            </div>
+          </div>
+        )}
+
+        <div ref={messagesEndRef} />
+      </div>
+
+      <div className="bg-white border-t border-gray-200 px-6 py-4">
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            handleSendMessage();
+          }}
+          className="flex gap-3"
+        >
           <input
             type="text"
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
-            onKeyPress={handleKeyPress}
-            placeholder="Ask me anything about the reunion..."
-            className="flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+            placeholder="Type your message..."
+            className="flex-1 px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
             disabled={isLoading}
           />
           <button
-            onClick={handleSendMessage}
+            type="submit"
             disabled={isLoading || !inputValue.trim()}
-            className="px-6 py-3 bg-orange-600 text-white rounded-lg hover:bg-orange-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors flex items-center gap-2 font-medium"
+            className="px-6 py-3 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2 font-medium"
           >
-            <Send className="w-4 h-4" />
-            <span className="hidden sm:inline">Send</span>
+            <Send className="w-5 h-5" />
+            Send
           </button>
-        </div>
+        </form>
       </div>
     </div>
   );

@@ -1,4 +1,4 @@
-import { supabase } from './supabase';
+import { storage } from './storage';
 
 export async function hashPassword(password: string): Promise<string> {
   const encoder = new TextEncoder();
@@ -11,24 +11,14 @@ export async function hashPassword(password: string): Promise<string> {
 export async function loginAdmin(email: string, password: string): Promise<{ success: boolean; userId?: string; error?: string }> {
   try {
     const passwordHash = await hashPassword(password);
+    const user = storage.findAdminByEmail(email);
 
-    const { data, error } = await supabase
-      .from('admin_users')
-      .select('id, email')
-      .eq('email', email)
-      .eq('password_hash', passwordHash)
-      .maybeSingle();
-
-    if (error) {
-      return { success: false, error: error.message };
-    }
-
-    if (!data) {
+    if (!user || user.password_hash !== passwordHash) {
       return { success: false, error: 'Invalid email or password' };
     }
 
-    localStorage.setItem('admin_user', JSON.stringify(data));
-    return { success: true, userId: data.id };
+    localStorage.setItem('admin_user', JSON.stringify({ id: user.id, email: user.email }));
+    return { success: true, userId: user.id };
   } catch (error) {
     return { success: false, error: 'Login failed' };
   }
@@ -38,18 +28,19 @@ export async function createAdminUser(email: string, password: string, createdBy
   try {
     const passwordHash = await hashPassword(password);
 
-    const { error } = await supabase
-      .from('admin_users')
-      .insert({
-        email,
-        password_hash: passwordHash,
-        created_by: createdBy
-      });
-
-    if (error) {
-      return { success: false, error: error.message };
+    const existing = storage.findAdminByEmail(email);
+    if (existing) {
+      return { success: false, error: 'User already exists' };
     }
 
+    const newUser = {
+      id: `admin-${Date.now()}`,
+      email,
+      password_hash: passwordHash,
+      created_at: new Date().toISOString()
+    };
+
+    storage.saveAdminUser(newUser);
     return { success: true };
   } catch (error) {
     return { success: false, error: 'Failed to create admin user' };
@@ -76,15 +67,15 @@ export function isAdminLoggedIn(): boolean {
 
 export async function updateAdminEmail(adminId: string, newEmail: string): Promise<{ success: boolean; error?: string }> {
   try {
-    const { error } = await supabase
-      .from('admin_users')
-      .update({ email: newEmail })
-      .eq('id', adminId);
+    const users = storage.getAdminUsers();
+    const user = users.find(u => u.id === adminId);
 
-    if (error) {
-      return { success: false, error: error.message };
+    if (!user) {
+      return { success: false, error: 'User not found' };
     }
 
+    user.email = newEmail;
+    storage.saveAdminUser(user);
     return { success: true };
   } catch (error) {
     return { success: false, error: 'Failed to update email' };
@@ -94,16 +85,15 @@ export async function updateAdminEmail(adminId: string, newEmail: string): Promi
 export async function updateAdminPassword(adminId: string, newPassword: string): Promise<{ success: boolean; error?: string }> {
   try {
     const passwordHash = await hashPassword(newPassword);
+    const users = storage.getAdminUsers();
+    const user = users.find(u => u.id === adminId);
 
-    const { error } = await supabase
-      .from('admin_users')
-      .update({ password_hash: passwordHash })
-      .eq('id', adminId);
-
-    if (error) {
-      return { success: false, error: error.message };
+    if (!user) {
+      return { success: false, error: 'User not found' };
     }
 
+    user.password_hash = passwordHash;
+    storage.saveAdminUser(user);
     return { success: true };
   } catch (error) {
     return { success: false, error: 'Failed to update password' };
@@ -111,20 +101,7 @@ export async function updateAdminPassword(adminId: string, newPassword: string):
 }
 
 export async function deleteAdminUser(adminId: string): Promise<{ success: boolean; error?: string }> {
-  try {
-    const { error } = await supabase
-      .from('admin_users')
-      .delete()
-      .eq('id', adminId);
-
-    if (error) {
-      return { success: false, error: error.message };
-    }
-
-    return { success: true };
-  } catch (error) {
-    return { success: false, error: 'Failed to delete admin user' };
-  }
+  return { success: false, error: 'Not implemented in local storage mode' };
 }
 
 function generateResetToken(): string {
@@ -134,94 +111,22 @@ function generateResetToken(): string {
 }
 
 export async function requestPasswordReset(email: string): Promise<{ success: boolean; token?: string; error?: string }> {
-  try {
-    const { data: adminExists } = await supabase
-      .from('admin_users')
-      .select('email')
-      .eq('email', email)
-      .maybeSingle();
+  const user = storage.findAdminByEmail(email);
 
-    if (!adminExists) {
-      return { success: false, error: 'No admin account found with this email' };
-    }
-
-    const resetToken = generateResetToken();
-    const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
-
-    const { error } = await supabase
-      .from('password_reset_tokens')
-      .insert({
-        admin_email: email,
-        reset_token: resetToken,
-        expires_at: expiresAt.toISOString(),
-        used: false
-      });
-
-    if (error) {
-      return { success: false, error: error.message };
-    }
-
-    return { success: true, token: resetToken };
-  } catch (error) {
-    return { success: false, error: 'Failed to create reset token' };
+  if (!user) {
+    return { success: false, error: 'No admin account found with this email' };
   }
+
+  const resetToken = generateResetToken();
+  console.log(`Password reset token for ${email}: ${resetToken}`);
+
+  return { success: true, token: resetToken };
 }
 
 export async function validateResetToken(token: string): Promise<{ success: boolean; email?: string; error?: string }> {
-  try {
-    const { data, error } = await supabase
-      .from('password_reset_tokens')
-      .select('admin_email, expires_at, used')
-      .eq('reset_token', token)
-      .maybeSingle();
-
-    if (error || !data) {
-      return { success: false, error: 'Invalid reset token' };
-    }
-
-    if (data.used) {
-      return { success: false, error: 'This reset token has already been used' };
-    }
-
-    if (new Date(data.expires_at) < new Date()) {
-      return { success: false, error: 'Reset token has expired' };
-    }
-
-    return { success: true, email: data.admin_email };
-  } catch (error) {
-    return { success: false, error: 'Failed to validate token' };
-  }
+  return { success: false, error: 'Password reset not fully implemented in local storage mode' };
 }
 
 export async function resetPasswordWithToken(token: string, newPassword: string): Promise<{ success: boolean; error?: string }> {
-  try {
-    const validation = await validateResetToken(token);
-    if (!validation.success || !validation.email) {
-      return { success: false, error: validation.error };
-    }
-
-    const passwordHash = await hashPassword(newPassword);
-
-    const { error: updateError } = await supabase
-      .from('admin_users')
-      .update({ password_hash: passwordHash })
-      .eq('email', validation.email);
-
-    if (updateError) {
-      return { success: false, error: updateError.message };
-    }
-
-    const { error: tokenError } = await supabase
-      .from('password_reset_tokens')
-      .update({ used: true })
-      .eq('reset_token', token);
-
-    if (tokenError) {
-      console.error('Failed to mark token as used:', tokenError);
-    }
-
-    return { success: true };
-  } catch (error) {
-    return { success: false, error: 'Failed to reset password' };
-  }
+  return { success: false, error: 'Password reset not fully implemented in local storage mode' };
 }

@@ -1,15 +1,9 @@
-import { supabase, KnowledgeBaseFile } from './supabase';
+import { storage, KnowledgeBaseFile } from './storage';
 import * as XLSX from 'xlsx';
 import { processFileIntoChunks, deleteChunksForFile } from './chunkProcessor';
 
-let pdfjsLib: typeof import('pdfjs-dist') | null = null;
-
-async function initPdfJs() {
-  if (!pdfjsLib) {
-    pdfjsLib = await import('pdfjs-dist');
-    pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
-  }
-  return pdfjsLib;
+export async function getAllFiles(): Promise<KnowledgeBaseFile[]> {
+  return storage.getFiles();
 }
 
 export async function uploadFile(
@@ -18,218 +12,135 @@ export async function uploadFile(
   category: string,
   keywords: string[],
   uploadedBy: string
-): Promise<{ success: boolean; error?: string; fileId?: string }> {
+): Promise<{ success: boolean; error?: string }> {
   try {
-    if (file.size > 10 * 1024 * 1024) {
-      return { success: false, error: 'File size must be less than 10MB' };
-    }
+    const fileContent = await readFileContent(file);
 
+    const newFile: KnowledgeBaseFile = {
+      id: `file-${Date.now()}`,
+      file_name: file.name,
+      file_type: file.type,
+      file_size: file.size,
+      file_content: fileContent,
+      description,
+      category,
+      keywords,
+      is_active: true,
+      uploaded_by: uploadedBy,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    };
 
-    const fileContent = await readFileAsText(file);
+    storage.saveFile(newFile);
 
-    const { data, error } = await supabase
-      .from('knowledge_base_files')
-      .insert({
-        file_name: file.name,
-        file_type: file.type,
-        file_size: file.size,
-        file_content: fileContent,
-        description,
-        category,
-        keywords,
-        is_active: true,
-        uploaded_by: uploadedBy
-      })
-      .select('id')
-      .single();
+    await processFileIntoChunks(newFile.id, fileContent, category, file.type);
 
-    if (error) {
-      return { success: false, error: error.message };
-    }
-
-    await processFileIntoChunks(data.id, fileContent, category, file.type);
-
-    return { success: true, fileId: data.id };
+    return { success: true };
   } catch (error) {
-    return { success: false, error: 'Failed to upload file' };
+    return { success: false, error: error instanceof Error ? error.message : 'Upload failed' };
   }
 }
 
 export async function updateFile(
   fileId: string,
-  updates: {
-    description?: string;
-    category?: string;
-    keywords?: string[];
-    is_active?: boolean;
-  }
+  updates: { description?: string; category?: string; keywords?: string[]; is_active?: boolean }
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    const { error } = await supabase
-      .from('knowledge_base_files')
-      .update({
-        ...updates,
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', fileId);
+    const files = storage.getFiles();
+    const file = files.find(f => f.id === fileId);
 
-    if (error) {
-      return { success: false, error: error.message };
+    if (!file) {
+      return { success: false, error: 'File not found' };
     }
 
+    const updatedFile = {
+      ...file,
+      ...updates,
+      updated_at: new Date().toISOString()
+    };
+
+    storage.saveFile(updatedFile);
     return { success: true };
   } catch (error) {
-    return { success: false, error: 'Failed to update file' };
+    return { success: false, error: error instanceof Error ? error.message : 'Update failed' };
   }
 }
 
 export async function deleteFile(fileId: string): Promise<{ success: boolean; error?: string }> {
   try {
     await deleteChunksForFile(fileId);
-
-    const { error } = await supabase
-      .from('knowledge_base_files')
-      .delete()
-      .eq('id', fileId);
-
-    if (error) {
-      return { success: false, error: error.message };
-    }
-
+    storage.deleteFile(fileId);
     return { success: true };
   } catch (error) {
-    return { success: false, error: 'Failed to delete file' };
+    return { success: false, error: error instanceof Error ? error.message : 'Delete failed' };
   }
 }
 
-export async function getAllFiles(): Promise<KnowledgeBaseFile[]> {
-  const { data } = await supabase
-    .from('knowledge_base_files')
-    .select('*')
-    .order('created_at', { ascending: false });
+async function readFileContent(file: File): Promise<string> {
+  const fileType = file.type;
 
-  return data || [];
-}
-
-async function readFileAsText(file: File): Promise<string> {
-  const isSpreadsheet =
-    file.type === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' ||
-    file.type === 'application/vnd.ms-excel' ||
-    file.name.endsWith('.xlsx') ||
-    file.name.endsWith('.xls') ||
-    file.name.endsWith('.csv');
-
-  const isPDF = file.type === 'application/pdf' || file.name.endsWith('.pdf');
-
-  if (isSpreadsheet) {
-    return readSpreadsheetAsText(file);
+  if (fileType === 'text/plain' || fileType === 'text/markdown') {
+    return await file.text();
   }
 
-  if (isPDF) {
-    return readPDFAsText(file);
+  if (fileType === 'application/pdf') {
+    return await extractTextFromPDF(file);
   }
 
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
+  if (
+    fileType === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' ||
+    fileType === 'application/vnd.ms-excel'
+  ) {
+    return await extractTextFromExcel(file);
+  }
 
-    reader.onload = () => {
-      const result = reader.result as string;
-      resolve(result);
-    };
+  if (
+    fileType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
+    fileType === 'application/msword'
+  ) {
+    return await file.text();
+  }
 
-    reader.onerror = () => reject(new Error('Failed to read file'));
-
-    if (file.type.startsWith('text/') ||
-        file.type === 'application/json' ||
-        file.name.endsWith('.txt') ||
-        file.name.endsWith('.md') ||
-        file.name.endsWith('.csv')) {
-      reader.readAsText(file);
-    } else {
-      reader.readAsDataURL(file);
-    }
-  });
+  throw new Error(`Unsupported file type: ${fileType}`);
 }
 
-async function readSpreadsheetAsText(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
+async function extractTextFromPDF(file: File): Promise<string> {
+  const arrayBuffer = await file.arrayBuffer();
+  const pdfjsLib = await import('pdfjs-dist');
 
-    reader.onload = (e) => {
-      try {
-        const data = new Uint8Array(e.target?.result as ArrayBuffer);
-        const workbook = XLSX.read(data, { type: 'array' });
+  pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
 
-        let textContent = '';
+  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  let fullText = '';
 
-        workbook.SheetNames.forEach((sheetName, index) => {
-          const worksheet = workbook.Sheets[sheetName];
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const textContent = await page.getTextContent();
+    const pageText = textContent.items.map((item: any) => item.str).join(' ');
+    fullText += pageText + '\n';
+  }
 
-          if (index > 0) {
-            textContent += '\n\n';
-          }
-
-          textContent += `=== ${sheetName} ===\n\n`;
-
-          const csvContent = XLSX.utils.sheet_to_csv(worksheet, {
-            FS: '\t',
-            RS: '\n'
-          });
-
-          textContent += csvContent;
-        });
-
-        resolve(textContent);
-      } catch (error) {
-        reject(new Error('Failed to parse spreadsheet'));
-      }
-    };
-
-    reader.onerror = () => reject(new Error('Failed to read spreadsheet file'));
-    reader.readAsArrayBuffer(file);
-  });
+  return fullText;
 }
 
-async function readPDFAsText(file: File): Promise<string> {
-  return new Promise(async (resolve, reject) => {
-    const reader = new FileReader();
+async function extractTextFromExcel(file: File): Promise<string> {
+  const arrayBuffer = await file.arrayBuffer();
+  const workbook = XLSX.read(arrayBuffer, { type: 'array' });
 
-    reader.onload = async (e) => {
-      try {
-        const pdfjs = await initPdfJs();
-        const typedArray = new Uint8Array(e.target?.result as ArrayBuffer);
-        const pdf = await pdfjs.getDocument({ data: typedArray }).promise;
-
-        let textContent = '';
-
-        for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
-          const page = await pdf.getPage(pageNum);
-          const content = await page.getTextContent();
-
-          const pageText = content.items
-            .map((item: any) => item.str)
-            .join(' ');
-
-          textContent += pageText + '\n\n';
-        }
-
-        resolve(textContent.trim());
-      } catch (error) {
-        reject(new Error('Failed to parse PDF'));
-      }
-    };
-
-    reader.onerror = () => reject(new Error('Failed to read PDF file'));
-    reader.readAsArrayBuffer(file);
+  let fullText = '';
+  workbook.SheetNames.forEach((sheetName) => {
+    const worksheet = workbook.Sheets[sheetName];
+    const sheetText = XLSX.utils.sheet_to_txt(worksheet);
+    fullText += `Sheet: ${sheetName}\n${sheetText}\n\n`;
   });
+
+  return fullText;
 }
 
 export function formatFileSize(bytes: number): string {
   if (bytes === 0) return '0 Bytes';
-
   const k = 1024;
   const sizes = ['Bytes', 'KB', 'MB', 'GB'];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
-
-  return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + ' ' + sizes[i];
+  return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
 }

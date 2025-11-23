@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { MessageSquare, Calendar, MapPin, Users, Settings } from 'lucide-react';
-import { supabase, AppCustomization } from '../lib/supabase';
+import { storage, AppCustomization } from '../lib/storage';
 import { isAdminLoggedIn } from '../lib/auth';
 
 interface WelcomeScreenProps {
@@ -13,18 +13,13 @@ export default function WelcomeScreen({ onStartChat, onAdminClick }: WelcomeScre
   const [isAdmin] = useState(() => isAdminLoggedIn());
 
   useEffect(() => {
+    storage.initializeSampleData();
     loadCustomization();
   }, []);
 
-  const loadCustomization = async () => {
-    const { data } = await supabase
-      .from('app_customization')
-      .select('*')
-      .single();
-
-    if (data) {
-      setCustomization(data);
-    }
+  const loadCustomization = () => {
+    const data = storage.getCustomization();
+    setCustomization(data);
   };
 
   const quickPrompts = [
